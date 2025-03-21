@@ -1,70 +1,66 @@
-from flask import Flask, request, jsonify
-import time, hmac, hashlib, requests, json
+import time
+import hmac
+import hashlib
+import requests
+import json
 import os
+from flask import Flask, request, jsonify
 from waitress import serve  # 使用 WSGI 伺服器
-
-app = Flask(__name__)
 
 # 環境變數 (Bitunix API Key)
 API_KEY = os.environ.get("API_KEY")
-API_SECRET = os.environ.get("API_SECRET")
-BASE_URL = "https://fapi.bitunix.com"
+SECRET_KEY = os.environ.get("API_SECRET")
+BASE_URL = "https://api.bitunix.com"
 
-# 產生 Bitunix 簽名
-def generate_signature(timestamp, method, endpoint, payload):
-    message = f"{timestamp}{method}{endpoint}{payload}"
-    return hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+# 生成簽名
+def generate_signature(api_path, params, secret_key):
+    sorted_params = '&'.join(f"{key}={params[key]}" for key in sorted(params))
+    str_to_sign = f"{api_path}&{sorted_params}"
+    signature = hmac.new(secret_key.encode(), str_to_sign.encode(), hashlib.sha256).hexdigest()
+    return signature
 
 # Bitunix 下單函數
-def place_order(symbol, side, size):
-    endpoint = "/api/v1/order/create"
-    url = BASE_URL + endpoint
-    method = "POST"
+def place_order(symbol, side, order_type, volume, price):
+    api_path = '/api/spot/v1/order/place_order'
+    url = BASE_URL + api_path
     timestamp = str(int(time.time() * 1000))
-    order_data = {
-        "symbol": symbol,
-        "price": "0",
-        "vol": size,
-        "leverage": 10,
-        "side": 1 if side == "buy" else 2,
-        "type": 1,
-        "open_type": 1,
-        "position_id": 0,
-        "external_oid": str(int(time.time())),
-        "stop_loss_price": "",
-        "take_profit_price": "",
-        "position_mode": 1,
-        "reduce_only": False
+    params = {
+        'symbol': symbol,
+        'side': side,
+        'type': order_type,
+        'volume': volume,
+        'price': price,
+        'timestamp': timestamp
     }
-    payload = json.dumps(order_data)
-    signature = generate_signature(timestamp, method, endpoint, payload)
+    signature = generate_signature(api_path, params, SECRET_KEY)
     headers = {
-        "ApiKey": API_KEY,
-        "Request-Time": timestamp,
-        "Signature": signature,
-        "Content-Type": "application/json"
+        'X-Bit-Access-Key': API_KEY,
+        'Content-Type': 'application/json'
     }
-    response = requests.post(url, headers=headers, data=payload)
-    print("Bitunix response:", response.json())  # log response for debugging
+    params['signature'] = signature
+    response = requests.post(url, headers=headers, data=json.dumps(params))
     return response.json()
 
 # Webhook 入口
+app = Flask(__name__)
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
     print("Received webhook:", data)  # log received data
     symbol = data.get("symbol")
-    side = data.get("side")
-    size = data.get("size")
+    side = 2 if data.get("side") == "buy" else 1
+    size = str(data.get("size"))
+    price = "0"  # 預設為市價單
     if not all([symbol, side, size]):
         return jsonify({"error": "Missing parameters"}), 400
     try:
-        result = place_order(symbol, side, size)
+        result = place_order(symbol, side, 2, size, price)  # 使用市價單 (type=2)
         return jsonify({"message": "Order executed", "result": result})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 新增一個首頁路由，Render 會自動檢查
+# 新增首頁路由，Render 會自動檢查
 @app.route("/")
 def home():
     return "Bitunix Webhook is Running!", 200
