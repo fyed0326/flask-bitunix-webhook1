@@ -1,2 +1,6 @@
 flask
 requests
+
+flask
+requests
+waitress
