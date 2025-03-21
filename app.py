@@ -21,24 +21,29 @@ def generate_signature(api_path, params, secret_key):
 
 # Bitunix 下單函數
 def place_order(symbol, side, order_type, volume, price):
-    api_path = '/api/spot/v1/order/place_order'
+    api_path = '/api/spot/v1/order/place_order'  # 確保這個路徑正確
     url = BASE_URL + api_path
     timestamp = str(int(time.time() * 1000))
+
     params = {
-        'symbol': symbol,
-        'side': side,
-        'type': order_type,
-        'volume': volume,
-        'price': price,
-        'timestamp': timestamp
+        "symbol": symbol,
+        "side": side,  # 1: 賣出, 2: 買入
+        "type": order_type,  # 1: 限價單, 2: 市價單
+        "volume": volume,  # 交易量
+        "price": price,  # 價格 (市價單可設為 0)
+        "timestamp": timestamp
     }
+
     signature = generate_signature(api_path, params, SECRET_KEY)
     headers = {
-        'X-Bit-Access-Key': API_KEY,
-        'Content-Type': 'application/json'
+        "X-Bit-Access-Key": API_KEY,
+        "Content-Type": "application/json"
     }
-    params['signature'] = signature
-    response = requests.post(url, headers=headers, data=json.dumps(params))
+    params["signature"] = signature
+    response = requests.post(url, headers=headers, json=params)
+
+    print("Bitunix API Response:", response.json())  # 打印 API 回應
+
     return response.json()
 
 # Webhook 入口
