@@ -1,18 +1,21 @@
-
 from flask import Flask, request, jsonify
 import time, hmac, hashlib, requests, json
 import os
+from waitress import serve  # 使用 WSGI 伺服器
 
 app = Flask(__name__)
 
+# 環境變數 (Bitunix API Key)
 API_KEY = os.environ.get("API_KEY")
 API_SECRET = os.environ.get("API_SECRET")
 BASE_URL = "https://fapi.bitunix.com"
 
+# 產生 Bitunix 簽名
 def generate_signature(timestamp, method, endpoint, payload):
     message = f"{timestamp}{method}{endpoint}{payload}"
     return hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
 
+# Bitunix 下單函數
 def place_order(symbol, side, size):
     endpoint = "/api/v1/order/create"
     url = BASE_URL + endpoint
@@ -44,6 +47,7 @@ def place_order(symbol, side, size):
     response = requests.post(url, headers=headers, data=payload)
     return response.json()
 
+# Webhook 入口
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
@@ -58,5 +62,11 @@ def webhook():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# 新增一個首頁路由，Render 會自動檢查
+@app.route("/")
+def home():
+    return "Bitunix Webhook is Running!", 200
+
+# 使用 Waitress 讓 Flask 運行於 Render（WSGI 伺服器）
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    serve(app, host="0.0.0.0", port=10000)
