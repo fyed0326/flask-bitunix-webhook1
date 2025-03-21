@@ -12,18 +12,13 @@ API_KEY = os.environ.get("API_KEY")
 SECRET_KEY = os.environ.get("API_SECRET")
 BASE_URL = "https://fapi.bitunix.com"
 
-# 正確的期貨下單 API 路徑
 api_path = "/api/v1/futures/trade/place_order"
 
 def generate_signature(nonce, timestamp, api_key, query_params, body, secret_key):
-    # 第一步：計算 digest
     digest_input = nonce + timestamp + api_key + query_params + body
     digest = hashlib.sha256(digest_input.encode('utf-8')).hexdigest()
-
-    # 第二步：計算簽名
     sign_input = digest + secret_key
     sign = hashlib.sha256(sign_input.encode('utf-8')).hexdigest()
-
     return sign
 
 def place_order(symbol, side, order_type, volume, price):
@@ -33,9 +28,9 @@ def place_order(symbol, side, order_type, volume, price):
 
     params = {
         "symbol": symbol,
-        "qty": volume,
+        "qty": float(volume),  # 確保 `qty` 是數字
         "side": side,
-        "tradeSide": "OPEN",
+        "tradeSide": "BOTH",  # 嘗試使用 BOTH
         "orderType": order_type,
         "price": price
     }
@@ -75,8 +70,8 @@ def webhook():
 
     symbol = data.get("symbol")
     side = "BUY" if data.get("side").lower() == "buy" else "SELL"
-    size = str(data.get("size"))
-    price = "0"  # 市價單價格設為0
+    size = float(data.get("size"))  # 確保 `size` 是數字
+    price = "0"
 
     try:
         result = place_order(symbol, side, "MARKET", size, price)
