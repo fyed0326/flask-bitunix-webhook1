@@ -10,41 +10,53 @@ from waitress import serve
 
 API_KEY = os.environ.get("API_KEY")
 SECRET_KEY = os.environ.get("API_SECRET")
-BASE_URL = "https://api.bitunix.com"
+BASE_URL = "https://fapi.bitunix.com"
 
-# ⚠️ 期貨交易的 API 路徑
-api_path = "/api/futures/v1/order/place_order"
+# 正確的期貨下單 API 路徑
+api_path = "/api/v1/futures/trade/place_order"
 
-def generate_signature(api_path, params, secret_key):
-    sorted_params = '&'.join(f"{key}={params[key]}" for key in sorted(params))
-    str_to_sign = f"{api_path}&{sorted_params}"
-    signature = hmac.new(secret_key.encode(), str_to_sign.encode(), hashlib.sha256).hexdigest()
-    return signature
+def generate_signature(nonce, timestamp, api_key, query_params, body, secret_key):
+    # 第一步：計算 digest
+    digest_input = nonce + timestamp + api_key + query_params + body
+    digest = hashlib.sha256(digest_input.encode('utf-8')).hexdigest()
+
+    # 第二步：計算簽名
+    sign_input = digest + secret_key
+    sign = hashlib.sha256(sign_input.encode('utf-8')).hexdigest()
+
+    return sign
 
 def place_order(symbol, side, order_type, volume, price):
     url = BASE_URL + api_path
     timestamp = str(int(time.time() * 1000))
+    nonce = os.urandom(16).hex()
 
     params = {
         "symbol": symbol,
+        "qty": volume,
         "side": side,
-        "type": order_type,
-        "volume": volume,
-        "price": price,
-        "timestamp": timestamp
+        "tradeSide": "OPEN",
+        "orderType": order_type,
+        "price": price
     }
 
-    signature = generate_signature(api_path, params, SECRET_KEY)
+    query_params = ""
+    body = json.dumps(params, separators=(',', ':'))
+
+    signature = generate_signature(nonce, timestamp, API_KEY, query_params, body, SECRET_KEY)
     headers = {
-        "X-Bit-Access-Key": API_KEY,
+        "api-key": API_KEY,
+        "nonce": nonce,
+        "timestamp": timestamp,
+        "sign": signature,
         "Content-Type": "application/json"
     }
-    params["signature"] = signature
-    response = requests.post(url, headers=headers, json=params)
+
+    response = requests.post(url, headers=headers, data=body)
 
     print(f"Request URL: {url}", flush=True)
     print(f"Request Headers: {headers}", flush=True)
-    print(f"Request Body: {params}", flush=True)
+    print(f"Request Body: {body}", flush=True)
     print(f"Bitunix API Response: {response.status_code} - {response.text}", flush=True)
 
     return response.json()
@@ -62,12 +74,12 @@ def webhook():
         return jsonify({"error": "No data received"}), 400
 
     symbol = data.get("symbol")
-    side = 2 if data.get("side") == "buy" else 1
+    side = "BUY" if data.get("side").lower() == "buy" else "SELL"
     size = str(data.get("size"))
-    price = "0"  
+    price = "0"  # 市價單價格設為0
 
     try:
-        result = place_order(symbol, side, 2, size, price)
+        result = place_order(symbol, side, "MARKET", size, price)
         return jsonify({"message": "Order executed", "result": result})
     except Exception as e:
         print(f"Error: {str(e)}", flush=True)
