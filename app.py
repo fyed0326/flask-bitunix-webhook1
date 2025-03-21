@@ -42,7 +42,11 @@ def place_order(symbol, side, order_type, volume, price):
     params["signature"] = signature
     response = requests.post(url, headers=headers, json=params)
 
-    print("Bitunix API Response:", response.json())  # 打印 API 回應
+    # 記錄 API 回應
+    print(f"Request URL: {url}")
+    print(f"Request Headers: {headers}")
+    print(f"Request Body: {params}")
+    print(f"Bitunix API Response: {response.status_code} - {response.text}")
 
     return response.json()
 
