@@ -12,6 +12,9 @@ API_KEY = os.environ.get("API_KEY")
 SECRET_KEY = os.environ.get("API_SECRET")
 BASE_URL = "https://api.bitunix.com"
 
+# ⚠️ 期貨交易的 API 路徑
+api_path = "/api/futures/v1/order/place_order"
+
 def generate_signature(api_path, params, secret_key):
     sorted_params = '&'.join(f"{key}={params[key]}" for key in sorted(params))
     str_to_sign = f"{api_path}&{sorted_params}"
@@ -19,7 +22,6 @@ def generate_signature(api_path, params, secret_key):
     return signature
 
 def place_order(symbol, side, order_type, volume, price):
-    api_path = "/api/futures/v1/order/place_order"
     url = BASE_URL + api_path
     timestamp = str(int(time.time() * 1000))
 
@@ -40,6 +42,9 @@ def place_order(symbol, side, order_type, volume, price):
     params["signature"] = signature
     response = requests.post(url, headers=headers, json=params)
 
+    print(f"Request URL: {url}", flush=True)
+    print(f"Request Headers: {headers}", flush=True)
+    print(f"Request Body: {params}", flush=True)
     print(f"Bitunix API Response: {response.status_code} - {response.text}", flush=True)
 
     return response.json()
@@ -49,11 +54,9 @@ app = Flask(__name__)
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
-    
-    # ✅ 確保 Render Logs 會輸出
     print("=== Webhook Received ===", flush=True)
     print(json.dumps(data, indent=2), flush=True)
-    sys.stdout.flush()  # 強制刷新輸出
+    sys.stdout.flush()
 
     if not data:
         return jsonify({"error": "No data received"}), 400
@@ -67,7 +70,7 @@ def webhook():
         result = place_order(symbol, side, 2, size, price)
         return jsonify({"message": "Order executed", "result": result})
     except Exception as e:
-        print(f"Error: {str(e)}", flush=True)  # 強制輸出錯誤
+        print(f"Error: {str(e)}", flush=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route("/")
