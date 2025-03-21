@@ -45,12 +45,14 @@ def place_order(symbol, side, size):
         "Content-Type": "application/json"
     }
     response = requests.post(url, headers=headers, data=payload)
+    print("Bitunix response:", response.json())  # log response for debugging
     return response.json()
 
 # Webhook 入口
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
+    print("Received webhook:", data)  # log received data
     symbol = data.get("symbol")
     side = data.get("side")
     size = data.get("size")
