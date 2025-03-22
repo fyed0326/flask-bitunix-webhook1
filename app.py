@@ -1,50 +1,50 @@
-import time
-import hmac
-import hashlib
-import requests
-import json
-import os
-import sys
 from flask import Flask, request, jsonify
 from waitress import serve
+import time, hmac, hashlib, requests, os, json
 
-# Bitunix API 設定
+app = Flask(__name__)
+
+# === API Key 環境變數（在 Render 設定） ===
 API_KEY = os.environ.get("API_KEY")
-SECRET_KEY = os.environ.get("API_SECRET")
+API_SECRET = os.environ.get("API_SECRET")
 BASE_URL = "https://fapi.bitunix.com"
-api_path = "/api/v1/futures/trade/place_order"
+ENDPOINT = "/api/v1/futures/trade/place_order"
 
-# 最多允許的未平倉訂單數量
-MAX_OPEN_ORDERS = 5
-open_orders = []  # 儲存當前未平倉訂單 ID
+# === 控制最大持倉 5 單 ===
+MAX_ORDERS = 5
+open_orders = []
 
-# 生成 Bitunix API 簽名
-def generate_signature(nonce, timestamp, api_key, query_params, body, secret_key):
-    digest_input = nonce + timestamp + api_key + query_params + body
-    digest = hashlib.sha256(digest_input.encode('utf-8')).hexdigest()
-    sign_input = digest + secret_key
-    sign = hashlib.sha256(sign_input.encode('utf-8')).hexdigest()
+def record_order(symbol, order_id):
+    global open_orders
+    open_orders = [o for o in open_orders if o["symbol"] == symbol]
+    if len(open_orders) >= MAX_ORDERS:
+        return False
+    open_orders.append({"symbol": symbol, "order_id": order_id})
+    return True
+
+def generate_signature(nonce, timestamp, api_key, query, body, secret):
+    data = nonce + timestamp + api_key + query + body
+    digest = hashlib.sha256(data.encode()).hexdigest()
+    sign = hashlib.sha256((digest + secret).encode()).hexdigest()
     return sign
 
-# 下單函數
-def place_order(symbol, side, volume, price, trade_side):
-    url = BASE_URL + api_path
+def place_order(symbol, side, qty, price, tradeSide="OPEN"):
+    url = BASE_URL + ENDPOINT
     timestamp = str(int(time.time() * 1000))
     nonce = os.urandom(16).hex()
 
-    params = {
+    body_data = {
         "symbol": symbol,
-        "qty": float(volume),
-        "side": side,
-        "tradeSide": trade_side,
+        "qty": qty,
+        "side": side.upper(),
         "orderType": "MARKET",
-        "price": price
+        "price": price,
+        "tradeSide": tradeSide
     }
 
-    query_params = ""
-    body = json.dumps(params, separators=(',', ':'))
+    body_str = json.dumps(body_data, separators=(',', ':'))
+    signature = generate_signature(nonce, timestamp, API_KEY, "", body_str, API_SECRET)
 
-    signature = generate_signature(nonce, timestamp, API_KEY, query_params, body, SECRET_KEY)
     headers = {
         "api-key": API_KEY,
         "nonce": nonce,
@@ -53,64 +53,42 @@ def place_order(symbol, side, volume, price, trade_side):
         "Content-Type": "application/json"
     }
 
-    response = requests.post(url, headers=headers, data=body)
-    print(f"Request URL: {url}", flush=True)
-    print(f"Request Headers: {headers}", flush=True)
-    print(f"Request Body: {body}", flush=True)
-    print(f"Bitunix API Response: {response.status_code} - {response.text}", flush=True)
-
+    response = requests.post(url, headers=headers, data=body_str)
+    print(f"[Bitunix 回應] {response.status_code} - {response.text}", flush=True)
     return response.json()
-
-# 紀錄訂單 ID 並限制最多單數
-def record_order(order_id):
-    if len(open_orders) >= MAX_OPEN_ORDERS:
-        return False
-    open_orders.append(order_id)
-    return True
-
-# Flask App 啟動
-app = Flask(__name__)
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    data = request.get_json()
-    print("=== Webhook Received ===", flush=True)
-    print(json.dumps(data, indent=2), flush=True)
-    sys.stdout.flush()
-
-    symbol = data.get("symbol", "BTCUSDT")
-    action = data.get("action", "").lower()
-    size = float(data.get("size", 0.0001))
-    price = str(data.get("price", "0"))
-
-    if action == "buy":
-        side = "BUY"
-        trade_side = "OPEN"
-    elif action == "sell":
-        side = "SELL"
-        trade_side = "OPEN"
-    else:
-        return jsonify({"error": "Invalid action"}), 400
-
-    # 限制最多同時持有的單數
-    if len(open_orders) >= MAX_OPEN_ORDERS:
-        print("❌ 超過最多持有 5 單限制，不下單", flush=True)
-        return jsonify({"message": "Order limit reached. No order sent."}), 200
-
-    try:
-        result = place_order(symbol, side, size, price, trade_side)
-        order_id = result.get("data", {}).get("orderId")
-        if order_id and record_order(order_id):
-            return jsonify({"message": "Order executed", "result": result})
-        else:
-            return jsonify({"message": "Order not recorded or limit reached", "result": result})
-    except Exception as e:
-        print(f"Error: {str(e)}", flush=True)
-        return jsonify({"error": str(e)}), 500
 
 @app.route("/")
 def home():
-    return "Webhook Server Running!", 200
+    return "✅ Bitunix Webhook Bot Online!", 200
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json()
+    print("\n[Webhook 收到] ↓↓↓")
+    print(json.dumps(data, indent=2), flush=True)
+
+    symbol = data.get("symbol", "BTCUSDT")
+    action = data.get("action", "").lower()
+    reason = data.get("reason", "")
+    price = str(data.get("price", "0"))
+    size = float(data.get("size", 0.0001))
+
+    if action not in ["buy", "sell"]:
+        return jsonify({"error": "Invalid action"}), 400
+
+    side = "BUY" if action == "buy" else "SELL"
+    trade_side = "CLOSE" if reason else "OPEN"
+
+    if trade_side == "OPEN" and len([o for o in open_orders if o["symbol"] == symbol]) >= MAX_ORDERS:
+        return jsonify({"message": "❌ 超過最大開單數量 5 單"}), 200
+
+    result = place_order(symbol, side, size, price, trade_side)
+    order_id = result.get("data", {}).get("orderId")
+
+    if trade_side == "OPEN" and order_id:
+        record_order(symbol, order_id)
+
+    return jsonify({"message": "✅ Webhook 處理完成", "result": result}), 200
 
 if __name__ == "__main__":
     serve(app, host="0.0.0.0", port=10000)
