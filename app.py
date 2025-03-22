@@ -71,7 +71,7 @@ def webhook():
     action = data.get("action", "").lower()
     reason = data.get("reason", "")
     price = str(data.get("price", "0"))
-    size = float(data.get("size", 0.0001))
+    size = float(data.get("size", 0.001))  # 修正：Bitunix 最小 0.001 BTC
 
     if action not in ["buy", "sell"]:
         return jsonify({"error": "Invalid action"}), 400
@@ -83,7 +83,14 @@ def webhook():
         return jsonify({"message": "❌ 超過最大開單數量 5 單"}), 200
 
     result = place_order(symbol, side, size, price, trade_side)
-    order_id = result.get("data", {}).get("orderId")
+
+    # 錯誤處理：Bitunix 錯誤碼非 0
+    if result.get("code") != 0:
+        print(f"⚠️ Bitunix 錯誤：{result.get('msg')}", flush=True)
+        return jsonify({"message": "Bitunix 錯誤", "result": result}), 200
+
+    data_obj = result.get("data") or {}  # 防止 .get 報錯
+    order_id = data_obj.get("orderId")
 
     if trade_side == "OPEN" and order_id:
         record_order(symbol, order_id)
