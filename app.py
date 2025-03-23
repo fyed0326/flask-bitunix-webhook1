@@ -1,3 +1,4 @@
+# app.py - 修正 Bitunix 行情 API 簽名取得市價
 
 from flask import Flask, request, jsonify
 import time
@@ -20,7 +21,7 @@ MARKET_ENDPOINT = "/api/v1/futures/market/ticker/24h"
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 ORDER_QTY = 0.001
 DISTANCE_PERCENT = 0.2
-CANCEL_THRESHOLD = 0.5  # 當價格偏離市價 0.5% 就撤單
+CANCEL_THRESHOLD = 0.5
 
 @app.route("/maker", methods=["POST"])
 def maker_order():
@@ -62,7 +63,6 @@ def cancel_old_orders(symbol, market_price):
     res = requests.get(BASE_URL + OPEN_ORDERS_ENDPOINT, headers=headers, params=params)
     if res.status_code != 200:
         return
-
     orders = res.json().get("data", [])
     for order in orders:
         order_price = float(order.get("price", 0))
@@ -86,11 +86,22 @@ def cancel_order(symbol, order_id):
     print(f"⛔ 撤單 {symbol} {order_id} 回應:", res.json())
 
 def get_market_price(symbol):
-    url = f"{BASE_URL}{MARKET_ENDPOINT}?symbol={symbol}"
-    res = requests.get(url)
-    if res.status_code == 200:
+    timestamp, nonce = gen_time_nonce()
+    query = json_encode({"symbol": symbol})
+    message = f"{MARKET_ENDPOINT}\n{timestamp}\n{nonce}\n{query}"
+    signature = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+    headers = {
+        "api-key": API_KEY,
+        "timestamp": timestamp,
+        "nonce": nonce,
+        "sign": signature,
+        "Content-Type": "application/json"
+    }
+    res = requests.get(BASE_URL + MARKET_ENDPOINT, headers=headers, params={"symbol": symbol})
+    try:
         return float(res.json().get("data", {}).get("lastPrice", 0))
-    return None
+    except:
+        return None
 
 def place_limit_order(symbol, side, price):
     timestamp, nonce = gen_time_nonce()
