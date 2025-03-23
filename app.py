@@ -1,4 +1,4 @@
-# app.py - 修正 Bitunix 行情 API 簽名取得市價
+# app.py - 市價查詢改回無簽名方式，其餘保留簽名驗證
 
 from flask import Flask, request, jsonify
 import time
@@ -86,19 +86,9 @@ def cancel_order(symbol, order_id):
     print(f"⛔ 撤單 {symbol} {order_id} 回應:", res.json())
 
 def get_market_price(symbol):
-    timestamp, nonce = gen_time_nonce()
-    query = json_encode({"symbol": symbol})
-    message = f"{MARKET_ENDPOINT}\n{timestamp}\n{nonce}\n{query}"
-    signature = hmac.new(API_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
-    headers = {
-        "api-key": API_KEY,
-        "timestamp": timestamp,
-        "nonce": nonce,
-        "sign": signature,
-        "Content-Type": "application/json"
-    }
-    res = requests.get(BASE_URL + MARKET_ENDPOINT, headers=headers, params={"symbol": symbol})
     try:
+        url = f"{BASE_URL}{MARKET_ENDPOINT}?symbol={symbol}"
+        res = requests.get(url)
         return float(res.json().get("data", {}).get("lastPrice", 0))
     except:
         return None
